@@ -2,6 +2,9 @@ name: Package Offline Korean-Bengali Translation Model
 
 on:
   workflow_dispatch:
+  push:
+    branches: ["feature/android-offline-foundation-2026-10-12"]
+    paths: [".github/workflows/offline-model-pack.yml"]
 
 permissions:
   contents: read
