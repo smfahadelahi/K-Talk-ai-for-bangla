@@ -1,11 +1,9 @@
 package com.smfahadelahi.ktalk.ui
 
-import android.Manifest
 import android.content.pm.PackageManager
-import android.os.Handler
-import android.os.Looper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -35,61 +32,60 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import com.smfahadelahi.ktalk.audio.AudioCaptureController
 import com.smfahadelahi.ktalk.phrasebook.ConversationRole
 import com.smfahadelahi.ktalk.phrasebook.PhraseScenario
 import com.smfahadelahi.ktalk.phrasebook.Phrasebook
+import com.smfahadelahi.ktalk.speech.AndroidOnDeviceSpeechRecognizer
 import com.smfahadelahi.ktalk.tts.AndroidOfflineSpeechOutput
 import kotlinx.coroutines.launch
 
 @Composable
 fun TranslatorScreen() {
     val context = LocalContext.current
-    val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val coroutineScope = rememberCoroutineScope()
     var input by remember { mutableStateOf("") }
-    var isListening by remember { mutableStateOf(false) }
+    var isRecognizing by remember { mutableStateOf(false) }
     var status by remember {
-        mutableStateOf("Offline models are not installed. Translation is not available yet.")
+        mutableStateOf("Check whether this device has on-device speech recognition and offline language packs installed.")
     }
     var selectedRole by remember { mutableStateOf(ConversationRole.CUSTOMER) }
     var selectedScenario by remember { mutableStateOf(PhraseScenario.RESTAURANT) }
+    var pendingLanguage by remember { mutableStateOf("ko-KR") }
 
     val speechOutput = remember(context) { AndroidOfflineSpeechOutput(context.applicationContext) }
     DisposableEffect(speechOutput) {
         onDispose { speechOutput.close() }
     }
+    val onDeviceRecognizer = remember(context) { AndroidOnDeviceSpeechRecognizer(context.applicationContext) }
 
-    val captureController = remember(context) {
-        AudioCaptureController(
-            context = context.applicationContext,
-            onUtterance = { audio, sampleRate ->
-                mainHandler.post {
-                    val seconds = audio.size / sampleRate
-                    status = "Speech segment captured locally (${seconds}s). The offline Korean speech model is not connected yet, so no transcript was invented."
+    fun beginRecognition(languageTag: String) {
+        pendingLanguage = languageTag
+        if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            microphonePermission.launch(android.Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        coroutineScope.launch {
+            isRecognizing = true
+            status = "Listening with Android's on-device recognizer ($languageTag). Wait until you finish speaking."
+            val result = onDeviceRecognizer.recognizeOnce(languageTag)
+            result.fold(
+                { transcript ->
+                    input = transcript
+                    status = "On-device speech recognized. Translation is not yet connected, so this is a transcript only."
+                },
+                { error ->
+                    status = error.message ?: "On-device recognition failed. Check that the language pack is installed."
                 }
-            },
-            onError = { message -> mainHandler.post { status = message } }
-        )
-    }
-
-    DisposableEffect(captureController) {
-        onDispose { captureController.stop() }
+            )
+            isRecognizing = false
+        }
     }
 
     val microphonePermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) {
-            isListening = captureController.start()
-            status = if (isListening) {
-                "Listening locally. Speak naturally; processing starts after a pause."
-            } else {
-                "Could not start microphone capture. Check Android microphone permission."
-            }
-        } else {
-            status = "Microphone permission denied. You can still use the offline phrasebook."
-        }
+        if (granted) beginRecognition(pendingLanguage)
+        else status = "Microphone permission denied. The offline phrasebook remains available."
     }
 
     Column(
@@ -110,21 +106,24 @@ fun TranslatorScreen() {
             }
         }
 
-        Button(
-            onClick = {
-                if (isListening) {
-                    captureController.stop()
-                    isListening = false
-                    status = "Microphone stopped. Captured audio was only held in memory."
-                } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                    isListening = captureController.start()
-                    status = if (isListening) "Listening locally. Speak naturally; processing starts after a pause." else "Could not start microphone capture."
-                } else {
-                    microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
-                }
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) { Text(if (isListening) "Stop listening" else "Start headphone conversation") }
+        Text("On-device speech recognition", style = MaterialTheme.typography.titleMedium)
+        Text(
+            if (onDeviceRecognizer.isAvailable()) "Android reports an on-device recognition service. Korean/Bengali offline language support depends on installed packs."
+            else "No on-device recognition service is available. No cloud recognizer fallback will be used.",
+            style = MaterialTheme.typography.bodySmall
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(
+                onClick = { if (!isRecognizing) beginRecognition("ko-KR") },
+                enabled = !isRecognizing,
+                modifier = Modifier.weight(1f)
+            ) { Text(if (isRecognizing && pendingLanguage == "ko-KR") "শুনছি…" else "한국어 듣기") }
+            Button(
+                onClick = { if (!isRecognizing) beginRecognition("bn-BD") },
+                enabled = !isRecognizing,
+                modifier = Modifier.weight(1f)
+            ) { Text(if (isRecognizing && pendingLanguage == "bn-BD") "শুনছি…" else "বাংলা বলুন") }
+        }
 
         Text("Offline voice test", style = MaterialTheme.typography.titleMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -137,7 +136,7 @@ fun TranslatorScreen() {
                     }
                 },
                 modifier = Modifier.weight(1f)
-            ) { Text("한국어 듣기") }
+            ) { Text("한국어 음성") }
             OutlinedButton(
                 onClick = {
                     coroutineScope.launch {
@@ -147,7 +146,7 @@ fun TranslatorScreen() {
                     }
                 },
                 modifier = Modifier.weight(1f)
-            ) { Text("বাংলা শুনুন") }
+            ) { Text("বাংলা ভয়েস") }
         }
 
         Text("Role-play phrasebook", style = MaterialTheme.typography.titleLarge)
@@ -186,15 +185,10 @@ fun TranslatorScreen() {
         } else {
             suggestions.forEach { phrase ->
                 Card {
-                    Column(
-                        Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(phrase.korean, style = MaterialTheme.typography.titleMedium)
                         Text(phrase.banglaMeaning, style = MaterialTheme.typography.bodyMedium)
-                        phrase.pronunciationBn?.let {
-                            Text("উচ্চারণ: $it", style = MaterialTheme.typography.bodySmall)
-                        }
+                        phrase.pronunciationBn?.let { Text("উচ্চারণ: $it", style = MaterialTheme.typography.bodySmall) }
                         OutlinedButton(
                             onClick = {
                                 coroutineScope.launch {
@@ -215,7 +209,7 @@ fun TranslatorScreen() {
             value = input,
             onValueChange = { input = it },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Korean or Bangla text") },
+            label = { Text("Recognized or manually entered text") },
             placeholder = { Text("এখানে লিখুন / 여기에 입력하세요") },
             minLines = 3
         )
@@ -235,11 +229,11 @@ fun TranslatorScreen() {
 
         Spacer(Modifier.height(4.dp))
         Text(
-            "Working now: local microphone capture, pause-based speech segmentation, offline phrasebook with role selection, and device-installed offline voice checks. Live speech recognition, Korean↔Bangla translation, and contextual AI reply suggestions still need real model integration.",
+            "Working now: Android on-device speech-recognition adapter, offline phrasebook with role selection, and local-voice checks. Korean↔Bangla machine translation and contextual AI reply suggestions still need real model integration.",
             style = MaterialTheme.typography.bodyMedium
         )
         Text(
-            "Privacy: audio is processed in memory and is not saved or uploaded. The app declares no INTERNET permission.",
+            "Privacy: the app declares no INTERNET permission and does not use a cloud recognizer fallback. Offline language packs must be available on the device.",
             style = MaterialTheme.typography.bodySmall
         )
     }
