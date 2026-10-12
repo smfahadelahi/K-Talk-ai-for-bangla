@@ -37,6 +37,7 @@ import com.smfahadelahi.ktalk.phrasebook.PhraseScenario
 import com.smfahadelahi.ktalk.phrasebook.Phrasebook
 import com.smfahadelahi.ktalk.speech.AndroidOnDeviceSpeechRecognizer
 import com.smfahadelahi.ktalk.tts.AndroidOfflineSpeechOutput
+import com.smfahadelahi.ktalk.translation.ReplySuggestionEngine
 import kotlinx.coroutines.launch
 
 @Composable
@@ -217,6 +218,37 @@ fun TranslatorScreen() {
             placeholder = { Text("এখানে লিখুন / 여기에 입력하세요") },
             minLines = 3
         )
+
+        val hasKoreanText = input.any { it in '\uAC00'..'\uD7A3' }
+        val replySuggestions = if (hasKoreanText) {
+            ReplySuggestionEngine.suggestReplyToKorean(input)
+        } else {
+            emptyList()
+        }
+        if (replySuggestions.isNotEmpty()) {
+            Text("সম্ভাব্য উত্তর (অফলাইন)", style = MaterialTheme.typography.titleMedium)
+            replySuggestions.forEach { suggestion ->
+                Card {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(suggestion.korean, style = MaterialTheme.typography.titleMedium)
+                        Text(suggestion.banglaMeaning, style = MaterialTheme.typography.bodyMedium)
+                        Text(suggestion.reasonBn, style = MaterialTheme.typography.bodySmall)
+                        OutlinedButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    val result = speechOutput.speak(suggestion.korean, "ko-KR")
+                                    status = result.fold(
+                                        { "Suggested Korean reply played using an offline voice." },
+                                        { "Offline Korean voice unavailable: ${it.message ?: "unknown error"}" }
+                                    )
+                                }
+                            }
+                        ) { Text("উত্তরটি শুনুন") }
+                    }
+                }
+            }
+        }
+
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(
                 onClick = {
