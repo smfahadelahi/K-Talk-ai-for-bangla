@@ -58,12 +58,7 @@ fun TranslatorScreen() {
     }
     val onDeviceRecognizer = remember(context) { AndroidOnDeviceSpeechRecognizer(context.applicationContext) }
 
-    fun beginRecognition(languageTag: String) {
-        pendingLanguage = languageTag
-        if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            microphonePermission.launch(android.Manifest.permission.RECORD_AUDIO)
-            return
-        }
+    fun runRecognition(languageTag: String) {
         coroutineScope.launch {
             isRecognizing = true
             status = "Listening with Android's on-device recognizer ($languageTag). Wait until you finish speaking."
@@ -84,8 +79,17 @@ fun TranslatorScreen() {
     val microphonePermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) beginRecognition(pendingLanguage)
+        if (granted) runRecognition(pendingLanguage)
         else status = "Microphone permission denied. The offline phrasebook remains available."
+    }
+
+    fun beginRecognition(languageTag: String) {
+        pendingLanguage = languageTag
+        if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            microphonePermission.launch(android.Manifest.permission.RECORD_AUDIO)
+        } else {
+            runRecognition(languageTag)
+        }
     }
 
     Column(
