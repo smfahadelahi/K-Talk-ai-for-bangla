@@ -71,6 +71,12 @@ class AndroidOfflineSpeechOutput(context: Context) : OfflineSpeechOutput {
                     if (id != null) pending.remove(id)?.let { if (it.isActive) it.resume(Unit) }
                 }
 
+                override fun onStop(id: String?, interrupted: Boolean) {
+                    if (id != null) pending.remove(id)?.let {
+                        if (it.isActive) it.resumeWithException(IllegalStateException("Speech was interrupted."))
+                    }
+                }
+
                 @Deprecated("Deprecated by Android")
                 override fun onError(id: String?) {
                     if (id != null) pending.remove(id)?.let {
