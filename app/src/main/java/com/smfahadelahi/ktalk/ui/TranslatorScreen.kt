@@ -38,7 +38,10 @@ import com.smfahadelahi.ktalk.phrasebook.Phrasebook
 import com.smfahadelahi.ktalk.speech.AndroidOnDeviceSpeechRecognizer
 import com.smfahadelahi.ktalk.tts.AndroidOfflineSpeechOutput
 import com.smfahadelahi.ktalk.translation.OfflinePhraseTranslator
+import com.smfahadelahi.ktalk.translation.OfflineTranslationModelStore
 import com.smfahadelahi.ktalk.translation.ReplySuggestionEngine
+import com.smfahadelahi.ktalk.translation.Small100TranslationEngine
+import com.smfahadelahi.ktalk.translation.TranslationDirection
 import com.smfahadelahi.ktalk.translation.TranslationResult
 import kotlinx.coroutines.launch
 
@@ -48,6 +51,8 @@ fun TranslatorScreen() {
     val coroutineScope = rememberCoroutineScope()
     var input by remember { mutableStateOf("") }
     var translationResult by remember { mutableStateOf<TranslationResult?>(null) }
+    var translationModelInstalled by remember { mutableStateOf(OfflineTranslationModelStore.findInstalled(context) != null) }
+    var isTranslating by remember { mutableStateOf(false) }
     var isRecognizing by remember { mutableStateOf(false) }
     var status by remember {
         mutableStateOf("Check whether this device has on-device speech recognition and offline language packs installed.")
@@ -61,6 +66,31 @@ fun TranslatorScreen() {
         onDispose { speechOutput.close() }
     }
     val onDeviceRecognizer = remember(context) { AndroidOnDeviceSpeechRecognizer(context.applicationContext) }
+    val translationEngine = remember(context) { Small100TranslationEngine(context.applicationContext) }
+    DisposableEffect(translationEngine) {
+        onDispose { translationEngine.close() }
+    }
+
+    val modelPackPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            coroutineScope.launch {
+                status = "Installing offline translation model. This is a large file; keep the app open."
+                val installed = OfflineTranslationModelStore.installZip(context, uri)
+                installed.fold(
+                    {
+                        translationModelInstalled = true
+                        status = "Offline Korean↔Bengali translation model installed successfully."
+                    },
+                    { error ->
+                        translationModelInstalled = false
+                        status = "Model pack install failed: ${error.message ?: "invalid ZIP"}"
+                    }
+                )
+            }
+        }
+    }
 
     fun runRecognition(languageTag: String) {
         coroutineScope.launch {
@@ -111,6 +141,25 @@ fun TranslatorScreen() {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("System status", style = MaterialTheme.typography.titleMedium)
                 Text(status, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+
+        Card {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Offline translation model", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (translationModelInstalled) "SMaLL-100 model pack is installed. General Korean↔Bengali text translation can run locally."
+                    else "Model not installed. Import the separate SMaLL-100 ZIP pack (~600 MB) once; after setup, translation runs locally without an app network connection.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                OutlinedButton(
+                    onClick = {
+                        modelPackPicker.launch(
+                            arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text(if (translationModelInstalled) "Replace offline model pack" else "Import offline model ZIP") }
             }
         }
 
@@ -273,16 +322,43 @@ fun TranslatorScreen() {
                         translationResult = null
                         status = "Enter Korean or Bengali text first."
                     } else {
-                        translationResult = OfflinePhraseTranslator.translateExact(input)
-                        status = if (translationResult != null) {
-                            "Found an exact offline phrasebook match."
+                        val exact = OfflinePhraseTranslator.translateExact(input)
+                        if (exact != null) {
+                            translationResult = exact
+                            status = "Found an exact offline phrasebook match."
                         } else {
-                            "No exact phrasebook match. General Korean↔Bangla machine translation is not installed; no guess was returned."
+                            val direction = when {
+                                input.any { it in '\uAC00'..'\uD7A3' } -> TranslationDirection.KOREAN_TO_BANGLA
+                                input.any { it in '\u0980'..'\u09FF' } -> TranslationDirection.BANGLA_TO_KOREAN
+                                else -> null
+                            }
+                            if (direction == null) {
+                                translationResult = null
+                                status = "Enter Korean or Bengali text."
+                            } else {
+                                coroutineScope.launch {
+                                    isTranslating = true
+                                    status = if (translationModelInstalled) "Translating locally on this device…" else "Exact phrasebook match not found; import the offline model ZIP to translate arbitrary text."
+                                    val translated = translationEngine.translate(input, direction)
+                                    translated.fold(
+                                        { result ->
+                                            translationResult = result
+                                            status = "Translation completed locally."
+                                        },
+                                        { error ->
+                                            translationResult = null
+                                            status = error.message ?: "Local translation failed."
+                                        }
+                                    )
+                                    isTranslating = false
+                                }
+                            }
                         }
                     }
                 },
+                enabled = !isTranslating,
                 modifier = Modifier.weight(1f)
-            ) { Text("Translate") }
+            ) { Text(if (isTranslating) "অনুবাদ হচ্ছে…" else "Translate") }
             OutlinedButton(
                 onClick = { input = ""; translationResult = null; status = "Ready. Exact phrasebook translation is available for known phrases." },
                 modifier = Modifier.weight(1f)
@@ -291,7 +367,7 @@ fun TranslatorScreen() {
 
         Spacer(Modifier.height(4.dp))
         Text(
-            "Working now: Android on-device speech-recognition adapter, offline phrasebook with role selection, and local-voice checks. Korean↔Bangla machine translation and contextual AI reply suggestions still need real model integration.",
+            "Working now: Android on-device speech recognition, exact phrasebook translation, local SMaLL-100 ONNX translation after model-pack import, role-play phrases, rule-based reply suggestions, and local-voice checks. The model pack is not bundled in the APK.",
             style = MaterialTheme.typography.bodyMedium
         )
         Text(
