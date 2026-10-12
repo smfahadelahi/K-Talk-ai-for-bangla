@@ -95,18 +95,60 @@ fun TranslatorScreen() {
     fun runRecognition(languageTag: String) {
         coroutineScope.launch {
             isRecognizing = true
-            status = "Listening with Android's on-device recognizer ($languageTag). Wait until you finish speaking."
-            val result = onDeviceRecognizer.recognizeOnce(languageTag)
-            result.fold(
-                { transcript ->
-                    input = transcript
-                    status = "On-device speech recognized. Translation is not yet connected, so this is a transcript only."
-                },
-                { error ->
-                    status = error.message ?: "On-device recognition failed. Check that the language pack is installed."
-                }
-            )
-            isRecognizing = false
+            try {
+                status = "Listening with Android's on-device recognizer ($languageTag). Wait until you finish speaking."
+                val result = onDeviceRecognizer.recognizeOnce(languageTag)
+                result.fold(
+                    { transcript ->
+                        input = transcript
+                        val direction = if (languageTag.startsWith("ko")) {
+                            TranslationDirection.KOREAN_TO_BANGLA
+                        } else {
+                            TranslationDirection.BANGLA_TO_KOREAN
+                        }
+                        val outputLanguage = if (direction == TranslationDirection.KOREAN_TO_BANGLA) "bn-BD" else "ko-KR"
+                        val exact = OfflinePhraseTranslator.translateExact(transcript)
+
+                        if (exact != null) {
+                            translationResult = exact
+                            status = "Exact offline phrase match found. Playing the translation…"
+                            val spoken = speechOutput.speak(exact.translatedText, outputLanguage)
+                            status = spoken.fold(
+                                { "Phrase translated locally and played through the available offline voice." },
+                                { "Phrase translated locally, but offline voice output is unavailable: ${it.message ?: "unknown error"}" }
+                            )
+                        } else if (translationModelInstalled) {
+                            isTranslating = true
+                            status = "Speech recognized. Translating locally…"
+                            val translated = translationEngine.translate(transcript, direction)
+                            translated.fold(
+                                { value ->
+                                    translationResult = value
+                                    status = "Translation ready. Playing through the local voice…"
+                                    val spoken = speechOutput.speak(value.translatedText, outputLanguage)
+                                    status = spoken.fold(
+                                        { "Speech recognized, translated locally, and played through the offline voice." },
+                                        { "Translation is ready on screen, but local voice output is unavailable: ${it.message ?: "unknown error"}" }
+                                    )
+                                },
+                                { error ->
+                                    translationResult = null
+                                    status = error.message ?: "Local translation failed."
+                                }
+                            )
+                        } else {
+                            translationResult = null
+                            status = "Speech recognized. Import the offline model ZIP to translate arbitrary sentences; exact phrasebook matches still work."
+                        }
+                    },
+                    { error ->
+                        status = error.message ?: "On-device recognition failed. Check that the offline language pack is installed."
+                    }
+                )
+            } finally {
+                isRecognizing = false
+                isTranslating = false
+            }
         }
     }
 
