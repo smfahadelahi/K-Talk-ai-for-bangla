@@ -28,21 +28,30 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.smfahadelahi.ktalk.audio.AudioCaptureController
+import com.smfahadelahi.ktalk.tts.AndroidOfflineSpeechOutput
+import kotlinx.coroutines.launch
 
 @Composable
 fun TranslatorScreen() {
     val context = LocalContext.current
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    val coroutineScope = rememberCoroutineScope()
     var input by remember { mutableStateOf("") }
     var isListening by remember { mutableStateOf(false) }
     var status by remember {
         mutableStateOf("Offline models are not installed. Translation is not available yet.")
+    }
+
+    val speechOutput = remember(context) { AndroidOfflineSpeechOutput(context.applicationContext) }
+    DisposableEffect(speechOutput) {
+        onDispose { speechOutput.close() }
     }
 
     val captureController = remember(context) {
@@ -54,9 +63,7 @@ fun TranslatorScreen() {
                     status = "Speech segment captured locally (${seconds}s). The offline Korean speech model is not connected yet, so no transcript was invented."
                 }
             },
-            onError = { message ->
-                mainHandler.post { status = message }
-            }
+            onError = { message -> mainHandler.post { status = message } }
         )
     }
 
@@ -124,6 +131,37 @@ fun TranslatorScreen() {
             Text(if (isListening) "Stop listening" else "Start headphone conversation")
         }
 
+        Text("Offline voice test", style = MaterialTheme.typography.titleMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedButton(
+                onClick = {
+                    coroutineScope.launch {
+                        status = "Checking for an installed offline Korean voice…"
+                        val result = speechOutput.speak("안녕하세요. 반갑습니다.", "ko-KR")
+                        status = result.fold(
+                            { "Offline Korean voice test finished." },
+                            { "Korean offline voice unavailable: ${it.message ?: "unknown error"}" }
+                        )
+                    }
+                },
+                modifier = Modifier.weight(1f)
+            ) { Text("한국어 듣기") }
+
+            OutlinedButton(
+                onClick = {
+                    coroutineScope.launch {
+                        status = "Checking for an installed offline Bengali voice…"
+                        val result = speechOutput.speak("আমি কোরিয়ান ভাষা শিখছি।", "bn-BD")
+                        status = result.fold(
+                            { "Offline Bengali voice test finished." },
+                            { "Bengali offline voice unavailable: ${it.message ?: "unknown error"}" }
+                        )
+                    }
+                },
+                modifier = Modifier.weight(1f)
+            ) { Text("বাংলা শুনুন") }
+        }
+
         TextField(
             value = input,
             onValueChange = { input = it },
@@ -156,7 +194,7 @@ fun TranslatorScreen() {
 
         Spacer(Modifier.height(4.dp))
         Text(
-            "Current capability: local microphone capture and pause-based speech segmentation. Speech recognition, Korean↔Bangla translation, reply suggestions, and offline voice output still need real model integration.",
+            "Current capability: local microphone capture, pause-based speech segmentation, and a test for device-installed offline voices. Speech recognition, Korean↔Bangla translation, and reply suggestions still need real model integration.",
             style = MaterialTheme.typography.bodyMedium
         )
         Text(
