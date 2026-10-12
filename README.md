@@ -1,41 +1,50 @@
 # K-Talk-ai-for-bangla
 
-K-Bridge AI is an Android app foundation for private Korean ↔ Bangla communication and practical Korean phrase practice, designed around a strict offline-first requirement.
+K-Bridge AI is an Android app for private Korean ↔ Bangla communication and practical Korean phrase practice, built around a strict offline-first requirement.
 
 ## Implemented in this branch
 - Kotlin + Jetpack Compose Android app (minimum Android 12 / API 31).
-- Android on-device speech-recognition adapter for Korean and Bengali language tags; availability and offline language support depend on the installed device speech service and language packs.
-- Explicit no-cloud-fallback behavior when on-device speech recognition fails.
-- Local microphone capture and a basic pause-based segmenter retained as an experimental audio path.
-- Role-based offline phrasebook with Korean text, Bengali meanings, and some Bengali-script pronunciation hints.
-- Exact-match Korean↔Bengali translation for reviewed phrasebook entries; unknown sentences are not guessed.
-- Deterministic, rule-based Korean reply suggestions for common restaurant, payment, and clarification situations.
-- Android text-to-speech test that selects only voices marked as not requiring a network connection.
-- Interfaces for local speech recognition and translation.
+- Android's explicit on-device speech-recognition adapter for Korean and Bengali language tags; no cloud recognizer fallback.
+- Role-based offline phrasebook with Korean text, Bengali meanings, and pronunciation hints.
+- Exact-match phrasebook translation available without any model files.
+- Local SMaLL-100 INT8 ONNX translation engine for general Korean↔Bengali text after importing the model pack.
+- Deterministic offline reply suggestions for common restaurant, payment, and clarification situations.
+- Android TTS adapter that selects only voices marked as not requiring network access.
+- Model ZIP import into app-private storage; no in-app model download.
 - No Android INTERNET permission in the manifest.
 - GitHub Actions workflow to build a debug APK and run unit tests.
 
-## Important: not yet a complete translator
-The current project does **not** bundle or integrate a production Korean↔Bangla machine-translation model. The Translate button only translates exact phrases already present in the reviewed phrasebook. On-device speech recognition can only work if the phone provides a compatible local recognition service and the requested offline language pack is installed. Contextual suggestions are a small rule-based phrasebook, not a generative AI model.
+## Install the translation model once
+The model pack is separate from the APK because the INT8 ONNX model is about 600 MB.
 
-Automatic translation of arbitrary speech, a full turn-taking headphone loop, broad context-aware reply generation, and airplane-mode end-to-end verification are not yet complete. The app explicitly reports unavailable translation instead of inventing output.
+1. Open the repository's **Actions** tab.
+2. Select **Package Offline Korean-Bengali Translation Model**.
+3. Click **Run workflow**, wait for completion, then download the `small100-ko-bn-model-pack` artifact ZIP.
+4. Install the debug APK.
+5. In K-Bridge AI, tap **Import offline model ZIP** and select the downloaded ZIP.
+6. After import completes, the app can run model inference without internet access.
 
-Offline voice output depends on the user having local Korean/Bengali voices installed on Android. Some device TTS voices require network access; this app refuses voices marked as network-required.
+Model source and license: https://huggingface.co/casawolice/small100-onnx (SMaLL-100 ONNX, MIT license). Model-pack generation uses GitHub Actions; the Android app itself does not download the model.
 
-## Build
+## Important limitations
+- Android on-device speech recognition only works if the phone has a compatible on-device recognizer and offline language packs for the selected language. The app does not silently fall back to cloud recognition.
+- Offline speech output requires local Korean/Bengali voices installed on the phone; voices marked as network-required are rejected.
+- The translation model is wired into the app, but its runtime quality, latency, and memory use must be verified on a real Android device before production use.
+- Contextual replies are deterministic local rules/phrasebook suggestions, not a generative AI model.
+
+## Build and CI
 The GitHub Actions workflow uses JDK 17 and Gradle 8.9 to run:
 - `gradle assembleDebug`
 - `gradle testDebugUnitTest`
 
-After a successful run, download the `k-bridge-ai-debug-apk` artifact from the workflow run.
+After a successful run, download the `k-bridge-ai-debug-apk` artifact from that workflow run.
 
-## Next milestones
-1. Confirm CI passes on the latest branch head.
-2. Select, license-check, and integrate a local Korean↔Bangla translation model.
-3. Connect recognized speech to translation, then to Korean/Bengali local speech output.
-4. Add model-pack installation/setup and transparent storage/size information.
-5. Test end-to-end in airplane mode on a real Android device and measure latency/memory.
+## Acceptance test
+1. Install the APK and import the model ZIP.
+2. Enable airplane mode and restart the app.
+3. Test Korean→Bengali and Bengali→Korean translation with several real sentences.
+4. Test Korean and Bengali on-device speech recognition with offline language packs.
+5. Test local Korean and Bengali speech output.
+6. Measure quality, latency, memory, battery, and confirm no network traffic.
 
-See [offline model integration decisions](docs/OFFLINE_MODEL_INTEGRATION.md) for ASR candidates and acceptance criteria.
-
-Never add a cloud fallback or claim full offline support until real models and voices pass airplane-mode testing.
+Never claim the full conversation loop is production-ready until these tests pass on the target phone.
