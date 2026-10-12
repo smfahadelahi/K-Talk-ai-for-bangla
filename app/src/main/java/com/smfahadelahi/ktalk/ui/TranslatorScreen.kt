@@ -37,7 +37,9 @@ import com.smfahadelahi.ktalk.phrasebook.PhraseScenario
 import com.smfahadelahi.ktalk.phrasebook.Phrasebook
 import com.smfahadelahi.ktalk.speech.AndroidOnDeviceSpeechRecognizer
 import com.smfahadelahi.ktalk.tts.AndroidOfflineSpeechOutput
+import com.smfahadelahi.ktalk.translation.OfflinePhraseTranslator
 import com.smfahadelahi.ktalk.translation.ReplySuggestionEngine
+import com.smfahadelahi.ktalk.translation.TranslationResult
 import kotlinx.coroutines.launch
 
 @Composable
@@ -45,6 +47,7 @@ fun TranslatorScreen() {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var input by remember { mutableStateOf("") }
+    var translationResult by remember { mutableStateOf<TranslationResult?>(null) }
     var isRecognizing by remember { mutableStateOf(false) }
     var status by remember {
         mutableStateOf("Check whether this device has on-device speech recognition and offline language packs installed.")
@@ -212,12 +215,26 @@ fun TranslatorScreen() {
 
         TextField(
             value = input,
-            onValueChange = { input = it },
+            onValueChange = {
+                input = it
+                translationResult = null
+            },
             modifier = Modifier.fillMaxWidth(),
             label = { Text("Recognized or manually entered text") },
             placeholder = { Text("এখানে লিখুন / 여기에 입력하세요") },
             minLines = 3
         )
+
+        translationResult?.let { translated ->
+            Card {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Exact offline phrase match", style = MaterialTheme.typography.titleMedium)
+                    Text(translated.sourceText, style = MaterialTheme.typography.bodyMedium)
+                    Text(translated.translatedText, style = MaterialTheme.typography.titleLarge)
+                    Text("Reviewed phrasebook entry; this is not a general machine translation.", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
 
         val hasKoreanText = input.any { it in '\uAC00'..'\uD7A3' }
         val replySuggestions = if (hasKoreanText) {
@@ -252,13 +269,22 @@ fun TranslatorScreen() {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(
                 onClick = {
-                    status = if (input.isBlank()) "Enter text first. A real offline translation model is not connected yet."
-                    else "Translation model is not installed. No fake translation was returned."
+                    if (input.isBlank()) {
+                        translationResult = null
+                        status = "Enter Korean or Bengali text first."
+                    } else {
+                        translationResult = OfflinePhraseTranslator.translateExact(input)
+                        status = if (translationResult != null) {
+                            "Found an exact offline phrasebook match."
+                        } else {
+                            "No exact phrasebook match. General Korean↔Bangla machine translation is not installed; no guess was returned."
+                        }
+                    }
                 },
                 modifier = Modifier.weight(1f)
             ) { Text("Translate") }
             OutlinedButton(
-                onClick = { input = ""; status = "Ready. Offline translation model is not installed yet." },
+                onClick = { input = ""; translationResult = null; status = "Ready. Exact phrasebook translation is available for known phrases." },
                 modifier = Modifier.weight(1f)
             ) { Text("Clear") }
         }
