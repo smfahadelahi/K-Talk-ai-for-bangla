@@ -1,0 +1,54 @@
+name: Package Offline Korean-Bengali Translation Model
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Hugging Face Hub CLI
+        run: python -m pip install --upgrade huggingface_hub
+
+      - name: Download approved SMaLL-100 ONNX model files
+        run: |
+          hf download casawolice/small100-onnx \
+            onnx/encoder_model.onnx \
+            onnx/decoder_model_merged.onnx \
+            tokenizer.json \
+            lang_tokens.json \
+            --local-dir model-pack
+
+      - name: Verify required model files
+        run: |
+          test -s model-pack/onnx/encoder_model.onnx
+          test -s model-pack/onnx/decoder_model_merged.onnx
+          test -s model-pack/tokenizer.json
+          test -s model-pack/lang_tokens.json
+          ls -lh model-pack/onnx/*.onnx
+
+      - name: Create importable model ZIP
+        run: |
+          cd model-pack
+          zip -0 -r ../small100-ko-bn-model-pack.zip \
+            onnx/encoder_model.onnx \
+            onnx/decoder_model_merged.onnx \
+            tokenizer.json \
+            lang_tokens.json
+
+      - name: Upload model pack artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: small100-ko-bn-model-pack
+          path: small100-ko-bn-model-pack.zip
+          if-no-files-found: error
+          retention-days: 7
