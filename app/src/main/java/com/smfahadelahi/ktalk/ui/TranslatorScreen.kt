@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -35,6 +37,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.smfahadelahi.ktalk.audio.AudioCaptureController
+import com.smfahadelahi.ktalk.phrasebook.ConversationRole
+import com.smfahadelahi.ktalk.phrasebook.PhraseScenario
+import com.smfahadelahi.ktalk.phrasebook.Phrasebook
 import com.smfahadelahi.ktalk.tts.AndroidOfflineSpeechOutput
 import kotlinx.coroutines.launch
 
@@ -48,6 +53,8 @@ fun TranslatorScreen() {
     var status by remember {
         mutableStateOf("Offline models are not installed. Translation is not available yet.")
     }
+    var selectedRole by remember { mutableStateOf(ConversationRole.CUSTOMER) }
+    var selectedScenario by remember { mutableStateOf(PhraseScenario.RESTAURANT) }
 
     val speechOutput = remember(context) { AndroidOfflineSpeechOutput(context.applicationContext) }
     DisposableEffect(speechOutput) {
@@ -82,7 +89,7 @@ fun TranslatorScreen() {
                 "Could not start microphone capture. Check Android microphone permission."
             }
         } else {
-            status = "Microphone permission denied. You can still use text input when an offline model is available."
+            status = "Microphone permission denied. You can still use the offline phrasebook."
         }
     }
 
@@ -97,9 +104,7 @@ fun TranslatorScreen() {
         Text("Korean ↔ বাংলা", style = MaterialTheme.typography.titleMedium)
         Text("Private, offline-first conversation assistant", style = MaterialTheme.typography.bodyMedium)
 
-        Card(
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-        ) {
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("System status", style = MaterialTheme.typography.titleMedium)
                 Text(status, style = MaterialTheme.typography.bodyMedium)
@@ -112,24 +117,15 @@ fun TranslatorScreen() {
                     captureController.stop()
                     isListening = false
                     status = "Microphone stopped. Captured audio was only held in memory."
-                } else if (ContextCompat.checkSelfPermission(
-                        context, Manifest.permission.RECORD_AUDIO
-                    ) == PackageManager.PERMISSION_GRANTED
-                ) {
+                } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                     isListening = captureController.start()
-                    status = if (isListening) {
-                        "Listening locally. Speak naturally; processing starts after a pause."
-                    } else {
-                        "Could not start microphone capture."
-                    }
+                    status = if (isListening) "Listening locally. Speak naturally; processing starts after a pause." else "Could not start microphone capture."
                 } else {
                     microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
                 }
             },
             modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(if (isListening) "Stop listening" else "Start headphone conversation")
-        }
+        ) { Text(if (isListening) "Stop listening" else "Start headphone conversation") }
 
         Text("Offline voice test", style = MaterialTheme.typography.titleMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -138,28 +134,82 @@ fun TranslatorScreen() {
                     coroutineScope.launch {
                         status = "Checking for an installed offline Korean voice…"
                         val result = speechOutput.speak("안녕하세요. 반갑습니다.", "ko-KR")
-                        status = result.fold(
-                            { "Offline Korean voice test finished." },
-                            { "Korean offline voice unavailable: ${it.message ?: "unknown error"}" }
-                        )
+                        status = result.fold({ "Offline Korean voice test finished." }, { "Korean offline voice unavailable: ${it.message ?: "unknown error"}" })
                     }
                 },
                 modifier = Modifier.weight(1f)
             ) { Text("한국어 듣기") }
-
             OutlinedButton(
                 onClick = {
                     coroutineScope.launch {
                         status = "Checking for an installed offline Bengali voice…"
                         val result = speechOutput.speak("আমি কোরিয়ান ভাষা শিখছি।", "bn-BD")
-                        status = result.fold(
-                            { "Offline Bengali voice test finished." },
-                            { "Bengali offline voice unavailable: ${it.message ?: "unknown error"}" }
-                        )
+                        status = result.fold({ "Offline Bengali voice test finished." }, { "Bengali offline voice unavailable: ${it.message ?: "unknown error"}" })
                     }
                 },
                 modifier = Modifier.weight(1f)
             ) { Text("বাংলা শুনুন") }
+        }
+
+        Text("Role-play phrasebook", style = MaterialTheme.typography.titleLarge)
+        Text("আপনি কোন ভূমিকায় কথা বলছেন?", style = MaterialTheme.typography.bodyMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            ConversationRole.entries.forEach { role ->
+                if (selectedRole == role) {
+                    Button(onClick = { selectedRole = role }, modifier = Modifier.weight(1f)) {
+                        Text(role.labelBn, style = MaterialTheme.typography.labelSmall)
+                    }
+                } else {
+                    OutlinedButton(onClick = { selectedRole = role }, modifier = Modifier.weight(1f)) {
+                        Text(role.labelBn, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+        }
+
+        Text("পরিস্থিতি বেছে নিন", style = MaterialTheme.typography.bodyMedium)
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            PhraseScenario.entries.forEach { scenario ->
+                if (selectedScenario == scenario) {
+                    Button(onClick = { selectedScenario = scenario }) { Text(scenario.labelBn) }
+                } else {
+                    OutlinedButton(onClick = { selectedScenario = scenario }) { Text(scenario.labelBn) }
+                }
+            }
+        }
+
+        val suggestions = Phrasebook.suggestions(selectedRole, selectedScenario)
+        if (suggestions.isEmpty()) {
+            Text("এই ভূমিকা ও পরিস্থিতির জন্য আরও বাক্য যোগ করা হবে।", style = MaterialTheme.typography.bodyMedium)
+        } else {
+            suggestions.forEach { phrase ->
+                Card {
+                    Column(
+                        Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(phrase.korean, style = MaterialTheme.typography.titleMedium)
+                        Text(phrase.banglaMeaning, style = MaterialTheme.typography.bodyMedium)
+                        phrase.pronunciationBn?.let {
+                            Text("উচ্চারণ: $it", style = MaterialTheme.typography.bodySmall)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    val result = speechOutput.speak(phrase.korean, "ko-KR")
+                                    status = result.fold(
+                                        { "Korean phrase played using an offline voice." },
+                                        { "Offline Korean voice unavailable: ${it.message ?: "unknown error"}" }
+                                    )
+                                }
+                            }
+                        ) { Text("কোরিয়ান শুনুন") }
+                    }
+                }
+            }
         }
 
         TextField(
@@ -170,35 +220,27 @@ fun TranslatorScreen() {
             placeholder = { Text("এখানে লিখুন / 여기에 입력하세요") },
             minLines = 3
         )
-
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(
                 onClick = {
-                    status = if (input.isBlank()) {
-                        "Enter text first. A real offline translation model is not connected yet."
-                    } else {
-                        "Translation model is not installed. No fake translation was returned."
-                    }
+                    status = if (input.isBlank()) "Enter text first. A real offline translation model is not connected yet."
+                    else "Translation model is not installed. No fake translation was returned."
                 },
                 modifier = Modifier.weight(1f)
             ) { Text("Translate") }
-
             OutlinedButton(
-                onClick = {
-                    input = ""
-                    status = "Ready. Offline translation model is not installed yet."
-                },
+                onClick = { input = ""; status = "Ready. Offline translation model is not installed yet." },
                 modifier = Modifier.weight(1f)
             ) { Text("Clear") }
         }
 
         Spacer(Modifier.height(4.dp))
         Text(
-            "Current capability: local microphone capture, pause-based speech segmentation, and a test for device-installed offline voices. Speech recognition, Korean↔Bangla translation, and reply suggestions still need real model integration.",
+            "Working now: local microphone capture, pause-based speech segmentation, offline phrasebook with role selection, and device-installed offline voice checks. Live speech recognition, Korean↔Bangla translation, and contextual AI reply suggestions still need real model integration.",
             style = MaterialTheme.typography.bodyMedium
         )
         Text(
-            "Privacy: audio is processed in memory by this foundation and is not saved or uploaded. The app declares no INTERNET permission.",
+            "Privacy: audio is processed in memory and is not saved or uploaded. The app declares no INTERNET permission.",
             style = MaterialTheme.typography.bodySmall
         )
     }
